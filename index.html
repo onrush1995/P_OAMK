@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Morning Housekeeping Board</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="aurora aurora-one"></div>
+    <div class="aurora aurora-two"></div>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Team Lead Workspace</p>
+          <h1>Morning Housekeeping Board</h1>
+          <p class="subtitle">
+            Track every room, assign staff, and share the morning sheet in one place.
+          </p>
+        </div>
+        <div class="date-panel">
+          <label for="workDate">Work Date</label>
+          <input id="workDate" type="date" />
+        </div>
+      </header>
+
+      <section class="stats" id="statsRow"></section>
+
+      <section class="actions">
+        <button id="startMorningBtn" class="btn btn-primary">Start New Morning</button>
+        <button id="autoAssignBtn" class="btn">Auto Assign Rooms</button>
+        <button id="copyShareBtn" class="btn">Copy Handoff Text</button>
+        <button id="printBtn" class="btn">Print Sheet</button>
+      </section>
+
+      <div class="grid">
+        <aside class="panel">
+          <div class="panel-header">
+            <h2>Team</h2>
+            <button id="addStaffBtn" class="btn btn-small">Add</button>
+          </div>
+          <div id="staffList" class="list"></div>
+        </aside>
+
+        <aside class="panel">
+          <div class="panel-header">
+            <h2>Rooms</h2>
+            <button id="addRoomBtn" class="btn btn-small">Add</button>
+          </div>
+          <div id="roomList" class="list"></div>
+        </aside>
+
+        <section class="panel board">
+          <div class="panel-header">
+            <h2>Daily Assignment Board</h2>
+            <button id="resetStatusBtn" class="btn btn-small">Reset Status</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Room</th>
+                  <th>Assigned To</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody id="assignmentBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <template id="staffItemTemplate">
+      <div class="list-item">
+        <div>
+          <strong class="item-title"></strong>
+          <p class="item-sub"></p>
+        </div>
+        <button class="icon-btn danger" title="Remove">Delete</button>
+      </div>
+    </template>
+
+    <template id="roomItemTemplate">
+      <div class="list-item">
+        <div>
+          <strong class="item-title"></strong>
+          <p class="item-sub"></p>
+        </div>
+        <button class="icon-btn danger" title="Remove">Delete</button>
+      </div>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
