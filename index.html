@@ -24,14 +24,35 @@
             Track every room, assign staff, and share the morning sheet in one place.
           </p>
         </div>
-        <div class="date-panel">
-          <label for="workDate">Work Date</label>
-          <input id="workDate" type="date" />
+        <div class="topbar-tools">
+          <div class="date-panel">
+            <label for="workDate">Work Date</label>
+            <input id="workDate" type="date" />
+          </div>
+          <div class="theme-panel">
+            <button id="themeToggleBtn" class="btn theme-toggle-btn" type="button" aria-pressed="true">
+              Dark Mode: On (True Black)
+            </button>
+            <label for="themeContrastSelect">Light Mode Style</label>
+            <select id="themeContrastSelect"></select>
+            <p id="themeContrastDescription" class="theme-description"></p>
+            <p class="theme-hotkeys">Hotkeys: Shift+M toggle dark | Shift+L light styles</p>
+          </div>
         </div>
       </header>
 
       <section class="stats" id="statsRow"></section>
       <section class="dirty-staff-stats" id="dirtyStaffStats"></section>
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <h2>Room Status</h2>
+        </div>
+        <div class="chart-layout">
+          <div class="pie-stage">
+            <div id="statusPieChart" class="status-pie-chart" aria-label="Room status pie chart"></div>
+          </div>
+        </div>
+      </section>
 
       <section class="actions">
         <button id="startMorningBtn" class="btn btn-primary">Start New Morning</button>
@@ -110,6 +131,7 @@
       </div>
     </template>
 
+    <script src="./libs/highcharts.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

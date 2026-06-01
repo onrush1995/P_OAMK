@@ -1,7 +1,46 @@
 (() => {
   const STORAGE_KEY = "housekeeping_teamlead_v1";
+  const THEME_STORAGE_KEY = "housekeeping_theme_v1";
   const STAFF_SEED_VERSION = 1;
   const MAX_ROOMS_PER_PERSON = 14;
+  const THEME_MODE_OPTIONS = [
+    { value: "dark", label: "Dark" },
+    { value: "light", label: "Light" },
+  ];
+  const LIGHT_CONTRAST_OPTIONS = [
+    {
+      value: "default",
+      label: "Default",
+      description: "Slightly darker sidebar than main panel.",
+    },
+    {
+      value: "low-contrast",
+      label: "Low Contrast",
+      description: "Sidebar and main panel use the same background.",
+    },
+    {
+      value: "all-white",
+      label: "All White",
+      description: "White sidebar and white main panel.",
+    },
+    {
+      value: "high-contrast",
+      label: "High Contrast",
+      description: "Dark sidebar with a light main panel.",
+    },
+  ];
+  const DARK_CONTRAST_OPTIONS = [
+    {
+      value: "true-black",
+      label: "True Black",
+      description: "Pure black sidebar and pure black main panel.",
+    },
+  ];
+  const DEFAULT_THEME_SETTINGS = {
+    mode: "dark",
+    lightContrast: "default",
+    darkContrast: "true-black",
+  };
   const STATUS_OPTIONS = [
     { value: "dirty", label: "Dirty", className: "status-dirty" },
     { value: "clean", label: "Clean", className: "status-clean" },
@@ -39,8 +78,12 @@
 
   const refs = {
     workDate: document.querySelector("#workDate"),
+    themeToggleBtn: document.querySelector("#themeToggleBtn"),
+    themeContrastSelect: document.querySelector("#themeContrastSelect"),
+    themeContrastDescription: document.querySelector("#themeContrastDescription"),
     statsRow: document.querySelector("#statsRow"),
     dirtyStaffStats: document.querySelector("#dirtyStaffStats"),
+    statusPieChart: document.querySelector("#statusPieChart"),
     staffList: document.querySelector("#staffList"),
     roomList: document.querySelector("#roomList"),
     assignmentBody: document.querySelector("#assignmentBody"),
@@ -58,7 +101,9 @@
   };
 
   let state = loadState();
+  let themeSettings = loadThemeSettings();
   let selectedDate = todayISO();
+  let roomStatusChart = null;
 
   init();
 
@@ -67,7 +112,9 @@
     migrateStarterRoomsToFloorPlan();
     refs.workDate.value = selectedDate;
     ensurePlanForDate(selectedDate);
+    applyThemeSettings();
     bindEvents();
+    renderThemeControls();
     renderAll();
   }
 
@@ -125,6 +172,20 @@
     refs.printBtn.addEventListener("click", () => {
       printSheet();
     });
+
+    if (refs.themeToggleBtn) {
+      refs.themeToggleBtn.addEventListener("click", () => {
+        toggleThemeMode();
+      });
+    }
+
+    if (refs.themeContrastSelect) {
+      refs.themeContrastSelect.addEventListener("change", (event) => {
+        setThemeContrastForActiveMode(event.target.value);
+      });
+    }
+
+    document.addEventListener("keydown", handleThemeHotkeys);
   }
 
   function loadState() {
@@ -151,6 +212,178 @@
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function loadThemeSettings() {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (!raw) {
+      return structuredCloneIfPossible(DEFAULT_THEME_SETTINGS);
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      const mode = normalizeThemeMode(parsed.mode);
+      return {
+        mode,
+        lightContrast: normalizeContrastForMode("light", parsed.lightContrast),
+        darkContrast: "true-black",
+      };
+    } catch (error) {
+      console.error("Unable to parse theme settings. Using defaults.", error);
+      return structuredCloneIfPossible(DEFAULT_THEME_SETTINGS);
+    }
+  }
+
+  function saveThemeSettings() {
+    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(themeSettings));
+  }
+
+  function renderThemeControls() {
+    if (refs.themeToggleBtn) {
+      const isDarkMode = themeSettings.mode === "dark";
+      refs.themeToggleBtn.textContent = isDarkMode ? "Dark Mode: On (True Black)" : "Dark Mode: Off";
+      refs.themeToggleBtn.setAttribute("aria-pressed", isDarkMode ? "true" : "false");
+    }
+    renderThemeContrastOptions();
+  }
+
+  function renderThemeContrastOptions() {
+    if (!refs.themeContrastSelect) {
+      return;
+    }
+
+    refs.themeContrastSelect.innerHTML = LIGHT_CONTRAST_OPTIONS
+      .map((option) => `<option value="${option.value}">${option.label}</option>`)
+      .join("");
+    refs.themeContrastSelect.value = normalizeContrastForMode("light", themeSettings.lightContrast);
+    const isDarkMode = themeSettings.mode === "dark";
+    refs.themeContrastSelect.disabled = isDarkMode;
+    refs.themeContrastSelect.title = isDarkMode ? "Switch dark mode off to change light style." : "";
+    renderThemeDescription();
+  }
+
+  function renderThemeDescription() {
+    if (!refs.themeContrastDescription) {
+      return;
+    }
+
+    if (themeSettings.mode === "dark") {
+      refs.themeContrastDescription.textContent = "Dark: True black is active.";
+      return;
+    }
+
+    const match = LIGHT_CONTRAST_OPTIONS.find(
+      (option) => option.value === normalizeContrastForMode("light", themeSettings.lightContrast)
+    );
+    refs.themeContrastDescription.textContent = `Light: ${match?.description || ""}`;
+  }
+
+  function applyThemeSettings() {
+    const mode = normalizeThemeMode(themeSettings.mode);
+    const contrast = getActiveContrastForMode(mode);
+    document.body.dataset.themeMode = mode;
+    document.body.dataset.themeContrast = contrast;
+    renderThemeDescription();
+  }
+
+  function setThemeMode(modeValue) {
+    themeSettings.mode = normalizeThemeMode(modeValue);
+    if (themeSettings.mode === "dark") {
+      themeSettings.darkContrast = "true-black";
+    }
+    applyThemeSettings();
+    renderThemeControls();
+    saveThemeSettings();
+  }
+
+  function setThemeContrastForActiveMode(contrastValue) {
+    setThemeContrastForMode("light", contrastValue);
+    applyThemeSettings();
+    renderThemeControls();
+    saveThemeSettings();
+  }
+
+  function setThemeContrastForMode(mode, contrastValue) {
+    if (mode === "light") {
+      themeSettings.lightContrast = normalizeContrastForMode("light", contrastValue);
+      return;
+    }
+    themeSettings.darkContrast = "true-black";
+  }
+
+  function getActiveContrastForMode(mode) {
+    if (mode === "light") {
+      return normalizeContrastForMode("light", themeSettings.lightContrast);
+    }
+    return "true-black";
+  }
+
+  function getContrastOptionsForMode(mode) {
+    return mode === "light" ? LIGHT_CONTRAST_OPTIONS : DARK_CONTRAST_OPTIONS;
+  }
+
+  function normalizeThemeMode(modeValue) {
+    return THEME_MODE_OPTIONS.some((option) => option.value === modeValue) ? modeValue : "dark";
+  }
+
+  function normalizeContrastForMode(mode, contrastValue) {
+    if (mode === "dark") {
+      return "true-black";
+    }
+    const options = getContrastOptionsForMode(mode);
+    return options.some((option) => option.value === contrastValue) ? contrastValue : options[0].value;
+  }
+
+  function cycleContrastForMode(mode) {
+    const options = getContrastOptionsForMode(mode);
+    const current = getActiveContrastForMode(mode);
+    const currentIndex = Math.max(
+      0,
+      options.findIndex((option) => option.value === current)
+    );
+    const next = options[(currentIndex + 1) % options.length];
+    setThemeContrastForMode(mode, next.value);
+    themeSettings.mode = mode;
+    applyThemeSettings();
+    renderThemeControls();
+    saveThemeSettings();
+  }
+
+  function toggleThemeMode() {
+    const nextMode = themeSettings.mode === "light" ? "dark" : "light";
+    setThemeMode(nextMode);
+  }
+
+  function handleThemeHotkeys(event) {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey || !event.shiftKey) {
+      return;
+    }
+
+    if (isTypingTarget(event.target)) {
+      return;
+    }
+
+    const key = String(event.key || "").toLowerCase();
+    if (key === "m") {
+      event.preventDefault();
+      toggleThemeMode();
+      return;
+    }
+
+    if (key === "l") {
+      event.preventDefault();
+      cycleContrastForMode("light");
+      return;
+    }
+
+    if (key === "d") {
+      event.preventDefault();
+      setThemeMode("dark");
+    }
   }
 
   function migrateDefaultStaffSeed() {
@@ -408,6 +641,7 @@
   function renderAll() {
     ensurePlanForDate(selectedDate);
     renderStats();
+    renderStatusPieChart();
     renderDirtyStaffStats();
     renderDirtyRoomCountInput();
     renderStaffList();
@@ -448,6 +682,163 @@
     const dirtyCount = countDirtyAssignments(plan.assignments);
     refs.dirtyRoomCountInput.max = String(plan.assignments.length);
     refs.dirtyRoomCountInput.value = String(dirtyCount);
+  }
+
+  function renderStatusPieChart() {
+    if (!refs.statusPieChart || typeof Highcharts === "undefined") {
+      return;
+    }
+
+    const plan = getPlan(selectedDate);
+    const totalRooms = plan.assignments.length;
+    const dirtyRooms = countDirtyAssignments(plan.assignments);
+    const cleanRooms = totalRooms - dirtyRooms;
+    const chartData = [
+      {
+        name: "Dirty",
+        y: dirtyRooms,
+        color: {
+          linearGradient: { x1: 0, y1: 0, x2: 1, y2: 1 },
+          stops: [
+            [0, "#ffd58a"],
+            [1, "#b7721c"],
+          ],
+        },
+      },
+      {
+        name: "Clean",
+        y: cleanRooms,
+        color: {
+          linearGradient: { x1: 0, y1: 0, x2: 1, y2: 1 },
+          stops: [
+            [0, "#6ee7b7"],
+            [1, "#0f9f6e"],
+          ],
+        },
+      },
+    ];
+
+    if (!roomStatusChart) {
+      roomStatusChart = Highcharts.chart("statusPieChart", {
+        chart: {
+          type: "pie",
+          backgroundColor: "transparent",
+          custom: { totalValue: totalRooms },
+          events: {
+            render() {
+              const chart = this;
+              const series = chart.series[0];
+              if (!series || !series.center) {
+                return;
+              }
+              let customLabel = chart.options.chart.custom.label;
+
+              if (!customLabel) {
+                customLabel = chart.options.chart.custom.label = chart.renderer
+                  .label("")
+                  .css({
+                    color: "var(--highcharts-neutral-color-100, #eaf4ff)",
+                    textAnchor: "middle",
+                  })
+                  .add();
+              }
+
+              const totalValue = chart.options.chart.custom.totalValue || 0;
+              customLabel.attr({
+                text: `Total<br/><strong>${formatWholeNumber(totalValue)}</strong>`,
+              });
+
+              const x = series.center[0] + chart.plotLeft;
+              const labelHeight = customLabel.attr("height") || 0;
+              const y = series.center[1] + chart.plotTop - labelHeight / 2;
+
+              customLabel.attr({ x, y });
+              customLabel.css({
+                fontSize: `${series.center[2] / 12}px`,
+              });
+            },
+          },
+        },
+        accessibility: {
+          point: {
+            valueSuffix: "%",
+          },
+        },
+        title: { text: null },
+        subtitle: { text: null },
+        tooltip: {
+          backgroundColor: "rgba(11, 22, 38, 0.96)",
+          borderColor: "#2f4969",
+          borderRadius: 10,
+          pointFormat: "{series.name}: <b>{point.percentage:.0f}%</b>",
+          style: {
+            color: "#f0f7ff",
+          },
+        },
+        legend: { enabled: false },
+        plotOptions: {
+          series: {
+            allowPointSelect: true,
+            cursor: "pointer",
+            borderRadius: 8,
+            dataLabels: [
+              {
+                enabled: true,
+                distance: 20,
+                format: "{point.name}",
+                style: {
+                  color: "#eff6ff",
+                  fontSize: "0.84em",
+                  textOutline: "none",
+                },
+              },
+              {
+                enabled: true,
+                distance: -15,
+                format: "{point.percentage:.0f}%",
+                style: {
+                  color: "#f8fcff",
+                  fontSize: "0.9em",
+                  textOutline: "none",
+                },
+              },
+            ],
+            showInLegend: true,
+            states: {
+              hover: {
+                enabled: true,
+                halo: {
+                  size: 7,
+                  opacity: 0.28,
+                },
+              },
+            },
+          },
+        },
+        series: [
+          {
+            name: "Room Status",
+            colorByPoint: true,
+            innerSize: "75%",
+            data: chartData,
+          },
+        ],
+      });
+      return;
+    }
+
+    roomStatusChart.update(
+      {
+        chart: {
+          custom: {
+            ...roomStatusChart.options.chart.custom,
+            totalValue: totalRooms,
+          },
+        },
+      },
+      false
+    );
+    roomStatusChart.series[0].setData(chartData, true);
   }
 
   function renderDirtyStaffStats() {
@@ -615,6 +1006,7 @@
           assignment.staffId = event.target.value;
           saveState();
           renderStats();
+          renderStatusPieChart();
           renderDirtyStaffStats();
           renderStaffList();
           renderRoomList();
@@ -638,6 +1030,7 @@
           statusBadge.textContent = statusLabel(assignment.status);
           saveState();
           renderStats();
+          renderStatusPieChart();
           renderDirtyStaffStats();
           renderDirtyRoomCountInput();
         });
@@ -1089,6 +1482,19 @@
     return [...items.slice(shift), ...items.slice(0, shift)];
   }
 
+  function isTypingTarget(target) {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (target.isContentEditable) {
+      return true;
+    }
+
+    const tagName = target.tagName.toLowerCase();
+    return tagName === "input" || tagName === "textarea" || tagName === "select";
+  }
+
   function todayISO() {
     const now = new Date();
     const year = now.getFullYear();
@@ -1109,6 +1515,10 @@
       return crypto.randomUUID();
     }
     return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  function formatWholeNumber(value) {
+    return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(value) || 0);
   }
 
   function escapeHtml(value) {
