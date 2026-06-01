@@ -215,6 +215,17 @@ h2 {
   overflow: auto;
 }
 
+.list-group-title {
+  padding: 0.5rem 0.8rem;
+  border-top: 1px solid #e2edf9;
+  border-bottom: 1px solid #e2edf9;
+  background: #f2f8ff;
+  color: #32516c;
+  font: 500 0.74rem/1 "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .list-item {
   display: flex;
   justify-content: space-between;
@@ -275,6 +286,14 @@ th {
   background: #f7fbff;
   font-size: 0.84rem;
   color: var(--muted);
+}
+
+.floor-divider td {
+  background: #eef4fb;
+  color: #35526a;
+  font: 500 0.74rem/1 "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .status-pill {

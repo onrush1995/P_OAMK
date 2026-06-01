@@ -6,6 +6,13 @@
     { value: "done", label: "Done", className: "status-done" },
     { value: "inspected", label: "Inspected", className: "status-inspected" },
   ];
+  const FLOOR_PLAN_RANGES = [
+    { start: 201, end: 223, floor: "2" },
+    { start: 301, end: 324, floor: "3" },
+    { start: 401, end: 425, floor: "4" },
+    { start: 501, end: 524, floor: "5" },
+    { start: 601, end: 625, floor: "6" },
+  ];
 
   const initialState = {
     staff: [
@@ -13,12 +20,7 @@
       { id: makeId(), name: "Ravi", role: "Housekeeper" },
       { id: makeId(), name: "Maya", role: "Housekeeper" },
     ],
-    rooms: [
-      { id: makeId(), name: "101", floor: "1", type: "Deluxe", notes: "VIP check" },
-      { id: makeId(), name: "102", floor: "1", type: "Standard", notes: "" },
-      { id: makeId(), name: "201", floor: "2", type: "Suite", notes: "Late checkout" },
-      { id: makeId(), name: "202", floor: "2", type: "Standard", notes: "" },
-    ],
+    rooms: buildRoomsFromRanges(FLOOR_PLAN_RANGES),
     plansByDate: {},
   };
 
@@ -33,6 +35,7 @@
     addStaffBtn: document.querySelector("#addStaffBtn"),
     addRoomBtn: document.querySelector("#addRoomBtn"),
     startMorningBtn: document.querySelector("#startMorningBtn"),
+    loadFloorPlanBtn: document.querySelector("#loadFloorPlanBtn"),
     autoAssignBtn: document.querySelector("#autoAssignBtn"),
     resetStatusBtn: document.querySelector("#resetStatusBtn"),
     copyShareBtn: document.querySelector("#copyShareBtn"),
@@ -45,6 +48,7 @@
   init();
 
   function init() {
+    migrateStarterRoomsToFloorPlan();
     refs.workDate.value = selectedDate;
     ensurePlanForDate(selectedDate);
     bindEvents();
@@ -67,6 +71,18 @@
       renderAll();
     });
 
+    refs.loadFloorPlanBtn.addEventListener("click", () => {
+      const shouldReplace = confirm(
+        "Load floor plan rooms 201-223, 301-324, 401-425, 501-524, 601-625? This replaces current rooms and daily assignments."
+      );
+      if (!shouldReplace) {
+        return;
+      }
+
+      replaceWithConfiguredFloorPlan();
+      renderAll();
+    });
+
     refs.autoAssignBtn.addEventListener("click", () => {
       autoAssignRooms();
       renderAll();
@@ -86,7 +102,7 @@
     });
 
     refs.printBtn.addEventListener("click", () => {
-      window.print();
+      printSheet();
     });
   }
 
@@ -111,6 +127,21 @@
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function migrateStarterRoomsToFloorPlan() {
+    if (!isLegacyStarterRoomList(state.rooms)) {
+      return;
+    }
+
+    replaceWithConfiguredFloorPlan();
+  }
+
+  function replaceWithConfiguredFloorPlan() {
+    state.rooms = buildRoomsFromRanges(FLOOR_PLAN_RANGES);
+    state.plansByDate = {};
+    ensurePlanForDate(selectedDate);
+    saveState();
   }
 
   function getPlan(dateKey) {
@@ -328,20 +359,25 @@
       return;
     }
 
-    const sortedRooms = [...state.rooms].sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
-    );
+    const groupedRooms = getRoomsGroupedByFloor(state.rooms);
 
-    sortedRooms.forEach((room) => {
-      const node = refs.roomTemplate.content.cloneNode(true);
-      const assignment = todayPlan.assignments.find((item) => item.roomId === room.id);
-      const assignedName = assignment ? getStaffName(assignment.staffId) : "Unassigned";
+    groupedRooms.forEach((group) => {
+      const floorLabel = document.createElement("div");
+      floorLabel.className = "list-group-title";
+      floorLabel.textContent = `Floor ${group.floor}`;
+      refs.roomList.appendChild(floorLabel);
 
-      node.querySelector(".item-title").textContent = `Room ${room.name}`;
-      node.querySelector(".item-sub").textContent = `${room.type || "Standard"} | Floor ${room.floor || "-"} | ${assignedName}`;
-      node.querySelector("button").addEventListener("click", () => removeRoom(room.id));
+      group.rooms.forEach((room) => {
+        const node = refs.roomTemplate.content.cloneNode(true);
+        const assignment = todayPlan.assignments.find((item) => item.roomId === room.id);
+        const assignedName = assignment ? getStaffName(assignment.staffId) : "Unassigned";
 
-      refs.roomList.appendChild(node);
+        node.querySelector(".item-title").textContent = `Room ${room.name}`;
+        node.querySelector(".item-sub").textContent = `${room.type || "Standard"} | ${assignedName}`;
+        node.querySelector("button").addEventListener("click", () => removeRoom(room.id));
+
+        refs.roomList.appendChild(node);
+      });
     });
   }
 
@@ -354,100 +390,99 @@
       return;
     }
 
-    const sortedAssignments = [...plan.assignments].sort((a, b) => {
-      const roomA = getRoom(a.roomId)?.name || "";
-      const roomB = getRoom(b.roomId)?.name || "";
-      return roomA.localeCompare(roomB, undefined, { numeric: true, sensitivity: "base" });
-    });
+    const groupedAssignments = getAssignmentsGroupedByFloor(plan.assignments);
 
-    sortedAssignments.forEach((assignment) => {
-      const room = getRoom(assignment.roomId);
-      const row = document.createElement("tr");
+    groupedAssignments.forEach((group) => {
+      const floorRow = document.createElement("tr");
+      floorRow.className = "floor-divider";
+      floorRow.innerHTML = `<td colspan="4">Floor ${escapeHtml(group.floor)}</td>`;
+      refs.assignmentBody.appendChild(floorRow);
 
-      const roomCell = document.createElement("td");
-      const roomLabel = document.createElement("strong");
-      roomLabel.textContent = room ? `Room ${room.name}` : "Unknown room";
+      group.assignments.forEach((assignment) => {
+        const room = getRoom(assignment.roomId);
+        const row = document.createElement("tr");
 
-      const roomMeta = document.createElement("p");
-      roomMeta.className = "item-sub";
-      roomMeta.textContent = [room?.type || "Standard", room?.floor ? `Floor ${room.floor}` : "", room?.notes || ""]
-        .filter(Boolean)
-        .join(" | ");
+        const roomCell = document.createElement("td");
+        const roomLabel = document.createElement("strong");
+        roomLabel.textContent = room ? `Room ${room.name}` : "Unknown room";
 
-      roomCell.append(roomLabel, roomMeta);
+        const roomMeta = document.createElement("p");
+        roomMeta.className = "item-sub";
+        roomMeta.textContent = [room?.type || "Standard", room?.notes || ""].filter(Boolean).join(" | ");
 
-      const staffCell = document.createElement("td");
-      const staffSelect = document.createElement("select");
-      staffSelect.innerHTML = `<option value="">Unassigned</option>${state.staff
-        .map((staff) => `<option value="${staff.id}">${escapeHtml(staff.name)}</option>`)
-        .join("")}`;
-      staffSelect.value = assignment.staffId || "";
-      staffSelect.addEventListener("change", (event) => {
-        assignment.staffId = event.target.value;
-        saveState();
-        renderStats();
-        renderStaffList();
-        renderRoomList();
+        roomCell.append(roomLabel, roomMeta);
+
+        const staffCell = document.createElement("td");
+        const staffSelect = document.createElement("select");
+        staffSelect.innerHTML = `<option value="">Unassigned</option>${state.staff
+          .map((staff) => `<option value="${staff.id}">${escapeHtml(staff.name)}</option>`)
+          .join("")}`;
+        staffSelect.value = assignment.staffId || "";
+        staffSelect.addEventListener("change", (event) => {
+          assignment.staffId = event.target.value;
+          saveState();
+          renderStats();
+          renderStaffList();
+          renderRoomList();
+        });
+        staffCell.appendChild(staffSelect);
+
+        const statusCell = document.createElement("td");
+        const statusSelect = document.createElement("select");
+        statusSelect.innerHTML = STATUS_OPTIONS.map(
+          (item) => `<option value="${item.value}">${item.label}</option>`
+        ).join("");
+        statusSelect.value = normalizeStatus(assignment.status);
+
+        const statusBadge = document.createElement("span");
+        statusBadge.className = `status-pill ${statusClass(statusSelect.value)}`;
+        statusBadge.textContent = statusLabel(statusSelect.value);
+
+        statusSelect.addEventListener("change", (event) => {
+          assignment.status = normalizeStatus(event.target.value);
+          statusBadge.className = `status-pill ${statusClass(assignment.status)}`;
+          statusBadge.textContent = statusLabel(assignment.status);
+          saveState();
+          renderStats();
+        });
+
+        statusCell.append(statusSelect, document.createElement("br"), statusBadge);
+
+        const notesCell = document.createElement("td");
+        const notesInput = document.createElement("textarea");
+        notesInput.placeholder = "Add a quick note";
+        notesInput.value = assignment.notes || "";
+        notesInput.addEventListener("change", (event) => {
+          assignment.notes = event.target.value.trim();
+          saveState();
+        });
+        notesCell.appendChild(notesInput);
+
+        row.append(roomCell, staffCell, statusCell, notesCell);
+        refs.assignmentBody.appendChild(row);
       });
-      staffCell.appendChild(staffSelect);
-
-      const statusCell = document.createElement("td");
-      const statusSelect = document.createElement("select");
-      statusSelect.innerHTML = STATUS_OPTIONS.map(
-        (item) => `<option value="${item.value}">${item.label}</option>`
-      ).join("");
-      statusSelect.value = normalizeStatus(assignment.status);
-
-      const statusBadge = document.createElement("span");
-      statusBadge.className = `status-pill ${statusClass(statusSelect.value)}`;
-      statusBadge.textContent = statusLabel(statusSelect.value);
-
-      statusSelect.addEventListener("change", (event) => {
-        assignment.status = normalizeStatus(event.target.value);
-        statusBadge.className = `status-pill ${statusClass(assignment.status)}`;
-        statusBadge.textContent = statusLabel(assignment.status);
-        saveState();
-        renderStats();
-      });
-
-      statusCell.append(statusSelect, document.createElement("br"), statusBadge);
-
-      const notesCell = document.createElement("td");
-      const notesInput = document.createElement("textarea");
-      notesInput.placeholder = "Add a quick note";
-      notesInput.value = assignment.notes || "";
-      notesInput.addEventListener("change", (event) => {
-        assignment.notes = event.target.value.trim();
-        saveState();
-      });
-      notesCell.appendChild(notesInput);
-
-      row.append(roomCell, staffCell, statusCell, notesCell);
-      refs.assignmentBody.appendChild(row);
     });
   }
 
   async function copyHandoffText() {
     const plan = getPlan(selectedDate);
-    const assignments = [...plan.assignments].sort((a, b) => {
-      const roomA = getRoom(a.roomId)?.name || "";
-      const roomB = getRoom(b.roomId)?.name || "";
-      return roomA.localeCompare(roomB, undefined, { numeric: true, sensitivity: "base" });
-    });
+    const assignments = getSortedAssignments(plan.assignments);
+    const groupedAssignments = getAssignmentsGroupedByFloor(assignments);
 
     const done = assignments.filter((item) => item.status === "done" || item.status === "inspected").length;
 
-    const lines = [
-      `Housekeeping Morning Sheet - ${selectedDate}`,
-      `Total Rooms: ${assignments.length} | Done/Inspected: ${done}`,
-      "",
-      ...assignments.map((assignment) => {
+    const lines = [`Housekeeping Morning Sheet - ${selectedDate}`, `Total Rooms: ${assignments.length} | Done/Inspected: ${done}`, ""];
+
+    groupedAssignments.forEach((group) => {
+      lines.push(`Floor ${group.floor}`);
+      group.assignments.forEach((assignment) => {
         const roomName = getRoom(assignment.roomId)?.name || "Unknown";
         const staffName = getStaffName(assignment.staffId);
         const notes = assignment.notes ? ` | Notes: ${assignment.notes}` : "";
-        return `Room ${roomName} | ${staffName} | ${statusLabel(assignment.status)}${notes}`;
-      }),
-    ];
+        lines.push(`Room ${roomName} | ${staffName} | ${statusLabel(assignment.status)}${notes}`);
+      });
+      lines.push("");
+    });
 
     const handoffText = lines.join("\n");
 
@@ -464,6 +499,98 @@
     document.execCommand("copy");
     document.body.removeChild(textArea);
     alert("Handoff text copied.");
+  }
+
+  function printSheet() {
+    const plan = getPlan(selectedDate);
+    const assignments = getSortedAssignments(plan.assignments);
+    const groupedAssignments = getAssignmentsGroupedByFloor(assignments);
+    const doneCount = assignments.filter((item) => item.status === "done" || item.status === "inspected").length;
+
+    const floorTables = groupedAssignments
+      .map((group) => {
+        const rows = group.assignments
+          .map((assignment) => {
+            const room = getRoom(assignment.roomId);
+            const roomLabel = room ? `Room ${room.name}` : "Unknown room";
+            const roomMeta = [room?.type || "Standard", room?.notes || ""].filter(Boolean).join(" | ");
+            const assignee = getStaffName(assignment.staffId);
+            const status = statusLabel(assignment.status);
+            const notes = assignment.notes || "-";
+
+            return `<tr>
+              <td>
+                <strong>${escapeHtml(roomLabel)}</strong>
+                <div class="sub">${escapeHtml(roomMeta || "-")}</div>
+              </td>
+              <td>${escapeHtml(assignee)}</td>
+              <td>${escapeHtml(status)}</td>
+              <td>${escapeHtml(notes)}</td>
+            </tr>`;
+          })
+          .join("");
+
+        return `<section class="floor-block">
+          <h2>Floor ${escapeHtml(group.floor)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Room</th>
+                <th>Assigned To</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </section>`;
+      })
+      .join("");
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      // Fallback for browsers that block popups from embedded views.
+      window.print();
+      return;
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Housekeeping Sheet ${escapeHtml(selectedDate)}</title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #142433; margin: 24px; }
+      h1 { margin: 0 0 6px; font-size: 24px; }
+      h2 { margin: 0 0 8px; font-size: 17px; color: #2e4b63; }
+      .meta { margin: 0 0 16px; color: #36536d; font-size: 14px; }
+      .summary { margin: 0 0 16px; font-size: 14px; }
+      .floor-block { margin: 0 0 16px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #cbd6e2; padding: 8px; text-align: left; vertical-align: top; font-size: 13px; }
+      th { background: #eef4fb; }
+      .sub { color: #4f6579; font-size: 12px; margin-top: 4px; }
+      @media print { body { margin: 10mm; } .floor-block { break-inside: avoid; } }
+    </style>
+  </head>
+  <body>
+    <h1>Morning Housekeeping Sheet</h1>
+    <p class="meta">Date: ${escapeHtml(selectedDate)}</p>
+    <p class="summary">Total Rooms: ${assignments.length} | Done/Inspected: ${doneCount}</p>
+    ${floorTables}
+  </body>
+</html>`;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.print();
+      }, 200);
+    };
   }
 
   function getStaffName(staffId) {
@@ -517,6 +644,121 @@
 
   function statusClass(statusValue) {
     return STATUS_OPTIONS.find((item) => item.value === statusValue)?.className || "status-pending";
+  }
+
+  function getSortedAssignments(assignments) {
+    return [...assignments].sort((a, b) => {
+      const roomA = getRoom(a.roomId);
+      const roomB = getRoom(b.roomId);
+      return compareRooms(roomA, roomB);
+    });
+  }
+
+  function getRoomsGroupedByFloor(rooms) {
+    const map = new Map();
+    const sortedRooms = [...rooms].sort((a, b) => compareRooms(a, b));
+
+    sortedRooms.forEach((room) => {
+      const floor = getFloorLabel(room);
+      if (!map.has(floor)) {
+        map.set(floor, []);
+      }
+      map.get(floor).push(room);
+    });
+
+    return [...map.entries()].map(([floor, groupedRooms]) => ({ floor, rooms: groupedRooms }));
+  }
+
+  function getAssignmentsGroupedByFloor(assignments) {
+    const map = new Map();
+    const sortedAssignments = getSortedAssignments(assignments);
+
+    sortedAssignments.forEach((assignment) => {
+      const floor = getFloorLabel(getRoom(assignment.roomId));
+      if (!map.has(floor)) {
+        map.set(floor, []);
+      }
+      map.get(floor).push(assignment);
+    });
+
+    return [...map.entries()].map(([floor, groupedAssignments]) => ({
+      floor,
+      assignments: groupedAssignments,
+    }));
+  }
+
+  function compareRooms(roomA, roomB) {
+    const floorComparison = compareFloorLabels(getFloorLabel(roomA), getFloorLabel(roomB));
+    if (floorComparison !== 0) {
+      return floorComparison;
+    }
+
+    const roomNameA = roomA?.name || "";
+    const roomNameB = roomB?.name || "";
+    return roomNameA.localeCompare(roomNameB, undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function compareFloorLabels(floorA, floorB) {
+    const numA = Number(floorA);
+    const numB = Number(floorB);
+    const isNumA = Number.isFinite(numA);
+    const isNumB = Number.isFinite(numB);
+
+    if (isNumA && isNumB && numA !== numB) {
+      return numA - numB;
+    }
+
+    if (isNumA && !isNumB) {
+      return -1;
+    }
+
+    if (!isNumA && isNumB) {
+      return 1;
+    }
+
+    return floorA.localeCompare(floorB, undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function getFloorLabel(room) {
+    const directFloor = room?.floor ? String(room.floor).trim() : "";
+    if (directFloor) {
+      return directFloor;
+    }
+
+    const roomName = room?.name ? String(room.name).trim() : "";
+    const floorFromName = roomName.match(/^(\d)/)?.[1];
+    if (floorFromName) {
+      return floorFromName;
+    }
+
+    return "Unknown";
+  }
+
+  function buildRoomsFromRanges(ranges) {
+    const rooms = [];
+
+    ranges.forEach((range) => {
+      for (let roomNo = range.start; roomNo <= range.end; roomNo += 1) {
+        rooms.push({
+          id: makeId(),
+          name: String(roomNo),
+          floor: range.floor,
+          type: "Standard",
+          notes: "",
+        });
+      }
+    });
+
+    return rooms;
+  }
+
+  function isLegacyStarterRoomList(rooms) {
+    if (!Array.isArray(rooms) || rooms.length !== 4) {
+      return false;
+    }
+
+    const roomNames = rooms.map((room) => room.name).sort().join(",");
+    return roomNames === "101,102,201,202";
   }
 
   function todayISO() {
