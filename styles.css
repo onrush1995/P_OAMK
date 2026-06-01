@@ -7,10 +7,8 @@
   --accent: #1f7a8c;
   --accent-2: #ffb703;
   --danger: #b3261e;
-  --pending: #7a8898;
-  --progress: #0b6e99;
-  --done: #2a9d8f;
-  --inspected: #5f42c6;
+  --dirty: #b56a00;
+  --clean: #2a9d8f;
 }
 
 * {
@@ -103,6 +101,7 @@ h1 {
 
 input[type="date"],
 input[type="text"],
+input[type="number"],
 select,
 textarea {
   width: 100%;
@@ -125,6 +124,44 @@ textarea {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.7rem;
+}
+
+.dirty-staff-stats {
+  margin: 0 0 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 0.55rem;
+}
+
+.dirty-person-card {
+  padding: 0.62rem 0.68rem;
+  border-radius: 11px;
+  border: 1px solid #d6e5f4;
+  background: linear-gradient(145deg, #fff9f0, #ffffff);
+}
+
+.dirty-person-card.off-shift {
+  opacity: 0.74;
+  background: linear-gradient(145deg, #f5f7fa, #ffffff);
+}
+
+.dirty-person-name {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.dirty-person-value {
+  margin: 0.2rem 0 0.15rem;
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: var(--dirty);
+}
+
+.dirty-person-meta {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--muted);
 }
 
 .stat-card {
@@ -152,6 +189,28 @@ textarea {
   flex-wrap: wrap;
   gap: 0.6rem;
   margin-bottom: 0.95rem;
+  align-items: flex-end;
+}
+
+.dirty-count-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f9fcff;
+}
+
+.dirty-count-input span {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.dirty-count-input input {
+  width: 180px;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.88rem;
 }
 
 .btn {
@@ -258,6 +317,29 @@ h2 {
   color: var(--danger);
 }
 
+.staff-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.availability-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  border: 1px solid #d4e4f4;
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+  color: #35526b;
+  background: #f4f9ff;
+}
+
+.availability-control input {
+  width: auto;
+  margin: 0;
+}
+
 .board {
   min-height: 540px;
 }
@@ -306,24 +388,14 @@ th {
   text-transform: uppercase;
 }
 
-.status-pending {
-  background: #eceff3;
-  color: var(--pending);
+.status-dirty {
+  background: #fff1da;
+  color: var(--dirty);
 }
 
-.status-progress {
-  background: #d8edf8;
-  color: var(--progress);
-}
-
-.status-done {
+.status-clean {
   background: #daf5f1;
-  color: var(--done);
-}
-
-.status-inspected {
-  background: #e5defb;
-  color: var(--inspected);
+  color: var(--clean);
 }
 
 .empty {

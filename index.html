@@ -31,11 +31,16 @@
       </header>
 
       <section class="stats" id="statsRow"></section>
+      <section class="dirty-staff-stats" id="dirtyStaffStats"></section>
 
       <section class="actions">
         <button id="startMorningBtn" class="btn btn-primary">Start New Morning</button>
         <button id="loadFloorPlanBtn" class="btn">Load Floor Plan (201-625)</button>
-        <button id="autoAssignBtn" class="btn">Auto Assign Rooms</button>
+        <button id="autoAssignBtn" class="btn">Smart Auto Assign</button>
+        <label class="dirty-count-input">
+          <span>Dirty Rooms (Selected Date)</span>
+          <input id="dirtyRoomCountInput" type="number" min="0" step="1" />
+        </label>
         <button id="copyShareBtn" class="btn">Copy Handoff Text</button>
         <button id="printBtn" class="btn">Print Sheet</button>
       </section>
@@ -85,7 +90,13 @@
           <strong class="item-title"></strong>
           <p class="item-sub"></p>
         </div>
-        <button class="icon-btn danger" title="Remove">Delete</button>
+        <div class="staff-actions">
+          <label class="availability-control">
+            <input class="availability-toggle" type="checkbox" />
+            <span class="availability-text">Working</span>
+          </label>
+          <button class="icon-btn danger delete-btn" title="Remove">Delete</button>
+        </div>
       </div>
     </template>
 

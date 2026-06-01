@@ -1,10 +1,25 @@
 (() => {
   const STORAGE_KEY = "housekeeping_teamlead_v1";
+  const STAFF_SEED_VERSION = 1;
+  const MAX_ROOMS_PER_PERSON = 14;
   const STATUS_OPTIONS = [
-    { value: "pending", label: "Pending", className: "status-pending" },
-    { value: "in_progress", label: "In Progress", className: "status-progress" },
-    { value: "done", label: "Done", className: "status-done" },
-    { value: "inspected", label: "Inspected", className: "status-inspected" },
+    { value: "dirty", label: "Dirty", className: "status-dirty" },
+    { value: "clean", label: "Clean", className: "status-clean" },
+  ];
+  const DEFAULT_TEAM_SEED = [
+    { name: "Alex", role: "Senior Attendant" },
+    { name: "Ravi", role: "Housekeeper" },
+    { name: "Maya", role: "Housekeeper" },
+    { name: "Sara", role: "Housekeeper" },
+    { name: "John", role: "Housekeeper" },
+    { name: "Lina", role: "Housekeeper" },
+    { name: "Omar", role: "Housekeeper" },
+    { name: "Priya", role: "Housekeeper" },
+    { name: "Daniel", role: "Housekeeper" },
+    { name: "Fatima", role: "Housekeeper" },
+    { name: "Noah", role: "Housekeeper" },
+    { name: "Emma", role: "Housekeeper" },
+    { name: "Lucas", role: "Housekeeper" },
   ];
   const FLOOR_PLAN_RANGES = [
     { start: 201, end: 223, floor: "2" },
@@ -15,18 +30,17 @@
   ];
 
   const initialState = {
-    staff: [
-      { id: makeId(), name: "Alex", role: "Senior Attendant" },
-      { id: makeId(), name: "Ravi", role: "Housekeeper" },
-      { id: makeId(), name: "Maya", role: "Housekeeper" },
-    ],
+    staff: buildDefaultStaff(),
     rooms: buildRoomsFromRanges(FLOOR_PLAN_RANGES),
     plansByDate: {},
+    availabilityByDate: {},
+    staffSeedVersion: STAFF_SEED_VERSION,
   };
 
   const refs = {
     workDate: document.querySelector("#workDate"),
     statsRow: document.querySelector("#statsRow"),
+    dirtyStaffStats: document.querySelector("#dirtyStaffStats"),
     staffList: document.querySelector("#staffList"),
     roomList: document.querySelector("#roomList"),
     assignmentBody: document.querySelector("#assignmentBody"),
@@ -38,6 +52,7 @@
     loadFloorPlanBtn: document.querySelector("#loadFloorPlanBtn"),
     autoAssignBtn: document.querySelector("#autoAssignBtn"),
     resetStatusBtn: document.querySelector("#resetStatusBtn"),
+    dirtyRoomCountInput: document.querySelector("#dirtyRoomCountInput"),
     copyShareBtn: document.querySelector("#copyShareBtn"),
     printBtn: document.querySelector("#printBtn"),
   };
@@ -48,6 +63,7 @@
   init();
 
   function init() {
+    migrateDefaultStaffSeed();
     migrateStarterRoomsToFloorPlan();
     refs.workDate.value = selectedDate;
     ensurePlanForDate(selectedDate);
@@ -91,9 +107,14 @@
     refs.resetStatusBtn.addEventListener("click", () => {
       const plan = getPlan(selectedDate);
       plan.assignments.forEach((assignment) => {
-        assignment.status = "pending";
+        assignment.status = "dirty";
       });
       saveState();
+      renderAll();
+    });
+
+    refs.dirtyRoomCountInput.addEventListener("change", (event) => {
+      applyDirtyRoomCountForSelectedDate(event.target.value);
       renderAll();
     });
 
@@ -118,6 +139,9 @@
         staff: Array.isArray(parsed.staff) ? parsed.staff : [],
         rooms: Array.isArray(parsed.rooms) ? parsed.rooms : [],
         plansByDate: parsed.plansByDate && typeof parsed.plansByDate === "object" ? parsed.plansByDate : {},
+        availabilityByDate:
+          parsed.availabilityByDate && typeof parsed.availabilityByDate === "object" ? parsed.availabilityByDate : {},
+        staffSeedVersion: Number.isFinite(parsed.staffSeedVersion) ? parsed.staffSeedVersion : 0,
       };
     } catch (error) {
       console.error("Unable to parse stored data. Using defaults.", error);
@@ -127,6 +151,28 @@
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function migrateDefaultStaffSeed() {
+    if (state.staffSeedVersion >= STAFF_SEED_VERSION) {
+      return;
+    }
+
+    const existingNames = new Set(state.staff.map((staff) => normalizeName(staff.name)));
+    DEFAULT_TEAM_SEED.forEach((seedStaff) => {
+      if (existingNames.has(normalizeName(seedStaff.name))) {
+        return;
+      }
+
+      state.staff.push({
+        id: makeId(),
+        name: seedStaff.name,
+        role: seedStaff.role,
+      });
+    });
+
+    state.staffSeedVersion = STAFF_SEED_VERSION;
+    saveState();
   }
 
   function migrateStarterRoomsToFloorPlan() {
@@ -153,6 +199,7 @@
 
   function ensurePlanForDate(dateKey) {
     const plan = getPlan(dateKey);
+    const availableStaffMap = getAvailabilityMap(dateKey);
     const existingByRoomId = new Map(
       (plan.assignments || []).filter(Boolean).map((assignment) => [assignment.roomId, assignment])
     );
@@ -163,7 +210,7 @@
         return {
           ...existing,
           roomId: room.id,
-          staffId: staffExists(existing.staffId) ? existing.staffId : "",
+          staffId: staffExists(existing.staffId) && availableStaffMap[existing.staffId] !== false ? existing.staffId : "",
           status: normalizeStatus(existing.status),
           notes: existing.notes || "",
         };
@@ -173,7 +220,7 @@
         id: makeId(),
         roomId: room.id,
         staffId: findPreviousStaffForRoom(room.id, dateKey),
-        status: "pending",
+        status: "dirty",
         notes: "",
       };
     });
@@ -185,29 +232,89 @@
       id: makeId(),
       roomId: room.id,
       staffId: findPreviousStaffForRoom(room.id, selectedDate),
-      status: "pending",
+      status: "dirty",
       notes: "",
     }));
     saveState();
   }
 
   function autoAssignRooms() {
-    if (!state.staff.length) {
-      alert("Add team members before auto assignment.");
+    const availableStaff = getAvailableStaffForDate(selectedDate);
+    if (!availableStaff.length) {
+      alert("Select at least one working team member for this date before auto assignment.");
       return;
     }
 
     const plan = getPlan(selectedDate);
-    const sortedAssignments = [...plan.assignments].sort((a, b) => {
-      const roomA = getRoom(a.roomId)?.name || "";
-      const roomB = getRoom(b.roomId)?.name || "";
-      return roomA.localeCompare(roomB, undefined, { numeric: true, sensitivity: "base" });
+    const sortedAssignments = getSortedAssignments(plan.assignments);
+    const dirtyAssignments = sortedAssignments.filter((assignment) => assignment.status === "dirty");
+
+    // Clean rooms do not need active assignment on the morning sheet.
+    sortedAssignments
+      .filter((assignment) => assignment.status !== "dirty")
+      .forEach((assignment) => {
+        assignment.staffId = "";
+      });
+
+    if (!dirtyAssignments.length) {
+      saveState();
+      return;
+    }
+
+    const totalCapacity = availableStaff.length * MAX_ROOMS_PER_PERSON;
+    const assignableDirtyCount = Math.min(dirtyAssignments.length, totalCapacity);
+    const baseQuota = Math.floor(assignableDirtyCount / availableStaff.length);
+    const extraQuotaCount = assignableDirtyCount % availableStaff.length;
+    const dayOffset = new Date(selectedDate).getDate() % availableStaff.length;
+    const rotatedStaff = rotateArray(availableStaff, dayOffset);
+    const staffBuckets = availableStaff.map((staff) => ({
+      staffId: staff.id,
+      roomCount: 0,
+      floors: new Set(),
+      targetQuota: baseQuota,
+    }));
+    rotatedStaff.slice(0, extraQuotaCount).forEach((staff) => {
+      const bucket = staffBuckets.find((item) => item.staffId === staff.id);
+      if (bucket) {
+        bucket.targetQuota += 1;
+      }
+    });
+    const groupedDirtyAssignments = getAssignmentsGroupedByFloor(dirtyAssignments).sort(
+      (a, b) => b.assignments.length - a.assignments.length
+    );
+
+    groupedDirtyAssignments.forEach((group) => {
+      const floorQueue = [...group.assignments];
+
+      while (floorQueue.length) {
+        const selectedBucket = pickBestStaffBucketForFloor(staffBuckets, group.floor);
+        if (!selectedBucket) {
+          floorQueue.forEach((remainingAssignment) => {
+            remainingAssignment.staffId = "";
+          });
+          break;
+        }
+
+        const remainingQuota = selectedBucket.targetQuota - selectedBucket.roomCount;
+        const chunkSize = Math.min(remainingQuota, floorQueue.length);
+
+        for (let index = 0; index < chunkSize; index += 1) {
+          const assignment = floorQueue.shift();
+          assignment.staffId = selectedBucket.staffId;
+          selectedBucket.roomCount += 1;
+        }
+
+        selectedBucket.floors.add(group.floor);
+      }
     });
 
-    const offset = new Date(selectedDate).getDate() % state.staff.length;
-    sortedAssignments.forEach((assignment, index) => {
-      assignment.staffId = state.staff[(index + offset) % state.staff.length].id;
-    });
+    const assignedDirtyCount = dirtyAssignments.filter((assignment) => assignment.staffId).length;
+    const unassignedDirtyCount = dirtyAssignments.length - assignedDirtyCount;
+    if (unassignedDirtyCount > 0) {
+      alert(
+        `Smart assign capacity reached. Assigned ${assignedDirtyCount}/${dirtyAssignments.length} dirty rooms. Max ${MAX_ROOMS_PER_PERSON} rooms per person.`
+      );
+    }
 
     saveState();
   }
@@ -219,7 +326,9 @@
     }
 
     const role = prompt("Role (optional):") || "Housekeeper";
-    state.staff.push({ id: makeId(), name: name.trim(), role: role.trim() || "Housekeeper" });
+    const newStaff = { id: makeId(), name: name.trim(), role: role.trim() || "Housekeeper" };
+    state.staff.push(newStaff);
+    getAvailabilityMap(selectedDate)[newStaff.id] = true;
 
     ensurePlanForDate(selectedDate);
     saveState();
@@ -261,6 +370,9 @@
     }
 
     state.staff = state.staff.filter((item) => item.id !== staffId);
+    Object.values(state.availabilityByDate || {}).forEach((availabilityMap) => {
+      delete availabilityMap[staffId];
+    });
     Object.values(state.plansByDate).forEach((plan) => {
       plan.assignments.forEach((assignment) => {
         if (assignment.staffId === staffId) {
@@ -296,6 +408,8 @@
   function renderAll() {
     ensurePlanForDate(selectedDate);
     renderStats();
+    renderDirtyStaffStats();
+    renderDirtyRoomCountInput();
     renderStaffList();
     renderRoomList();
     renderAssignmentBoard();
@@ -306,14 +420,14 @@
     const assignments = plan.assignments;
 
     const totalRooms = assignments.length;
-    const doneRooms = assignments.filter((item) => item.status === "done" || item.status === "inspected").length;
-    const inProgress = assignments.filter((item) => item.status === "in_progress").length;
+    const cleanRooms = assignments.filter((item) => item.status === "clean").length;
+    const dirtyRooms = assignments.filter((item) => item.status === "dirty").length;
     const unassigned = assignments.filter((item) => !item.staffId).length;
 
     const cards = [
       { label: "Total Rooms", value: totalRooms },
-      { label: "Done / Inspected", value: doneRooms },
-      { label: "In Progress", value: inProgress },
+      { label: "Clean", value: cleanRooms },
+      { label: "Dirty", value: dirtyRooms },
       { label: "Unassigned", value: unassigned },
     ];
 
@@ -329,9 +443,73 @@
       .join("");
   }
 
+  function renderDirtyRoomCountInput() {
+    const plan = getPlan(selectedDate);
+    const dirtyCount = countDirtyAssignments(plan.assignments);
+    refs.dirtyRoomCountInput.max = String(plan.assignments.length);
+    refs.dirtyRoomCountInput.value = String(dirtyCount);
+  }
+
+  function renderDirtyStaffStats() {
+    if (!refs.dirtyStaffStats) {
+      return;
+    }
+
+    if (!state.staff.length) {
+      refs.dirtyStaffStats.innerHTML = "";
+      return;
+    }
+
+    const plan = getPlan(selectedDate);
+    const availabilityMap = getAvailabilityMap(selectedDate);
+    const dirtyByStaffId = new Map(state.staff.map((staff) => [staff.id, 0]));
+    const totalByStaffId = new Map(state.staff.map((staff) => [staff.id, 0]));
+
+    plan.assignments.forEach((assignment) => {
+      if (!assignment.staffId || !dirtyByStaffId.has(assignment.staffId)) {
+        return;
+      }
+
+      totalByStaffId.set(assignment.staffId, (totalByStaffId.get(assignment.staffId) || 0) + 1);
+      if (assignment.status === "dirty") {
+        dirtyByStaffId.set(assignment.staffId, (dirtyByStaffId.get(assignment.staffId) || 0) + 1);
+      }
+    });
+
+    const rows = state.staff
+      .map((staff) => ({
+        staff,
+        dirty: dirtyByStaffId.get(staff.id) || 0,
+        total: totalByStaffId.get(staff.id) || 0,
+        isWorking: availabilityMap[staff.id] !== false,
+      }))
+      .sort((a, b) => {
+        if (b.dirty !== a.dirty) {
+          return b.dirty - a.dirty;
+        }
+        if (b.total !== a.total) {
+          return b.total - a.total;
+        }
+        return a.staff.name.localeCompare(b.staff.name, undefined, { sensitivity: "base" });
+      });
+
+    refs.dirtyStaffStats.innerHTML = rows
+      .map(
+        (entry) => `
+        <article class="dirty-person-card${entry.isWorking ? "" : " off-shift"}">
+          <p class="dirty-person-name">${escapeHtml(entry.staff.name)}</p>
+          <p class="dirty-person-value">${entry.dirty} dirty</p>
+          <p class="dirty-person-meta">${entry.total} total | ${entry.isWorking ? "Working" : "Off"}</p>
+        </article>
+      `
+      )
+      .join("");
+  }
+
   function renderStaffList() {
     refs.staffList.innerHTML = "";
     const todayPlan = getPlan(selectedDate);
+    const availabilityMap = getAvailabilityMap(selectedDate);
 
     if (!state.staff.length) {
       refs.staffList.innerHTML = '<p class="empty">No staff yet. Add your team members.</p>';
@@ -341,10 +519,24 @@
     state.staff.forEach((staff) => {
       const node = refs.staffTemplate.content.cloneNode(true);
       const workload = todayPlan.assignments.filter((assignment) => assignment.staffId === staff.id).length;
+      const dirtyWorkload = todayPlan.assignments.filter(
+        (assignment) => assignment.staffId === staff.id && assignment.status === "dirty"
+      ).length;
+      const isWorkingToday = availabilityMap[staff.id] !== false;
 
       node.querySelector(".item-title").textContent = staff.name;
-      node.querySelector(".item-sub").textContent = `${staff.role || "Housekeeper"} | ${workload} room(s)`;
-      node.querySelector("button").addEventListener("click", () => removeStaff(staff.id));
+      node.querySelector(".item-sub").textContent = `${staff.role || "Housekeeper"} | Dirty ${dirtyWorkload} | Total ${workload}`;
+
+      const availabilityToggle = node.querySelector(".availability-toggle");
+      const availabilityText = node.querySelector(".availability-text");
+      availabilityToggle.checked = isWorkingToday;
+      availabilityText.textContent = isWorkingToday ? "Working" : "Off";
+      availabilityToggle.addEventListener("change", (event) => {
+        setStaffAvailabilityForSelectedDate(staff.id, event.target.checked);
+        renderAll();
+      });
+
+      node.querySelector(".delete-btn").addEventListener("click", () => removeStaff(staff.id));
 
       refs.staffList.appendChild(node);
     });
@@ -414,7 +606,8 @@
 
         const staffCell = document.createElement("td");
         const staffSelect = document.createElement("select");
-        staffSelect.innerHTML = `<option value="">Unassigned</option>${state.staff
+        const availableStaff = getAvailableStaffForDate(selectedDate);
+        staffSelect.innerHTML = `<option value="">Unassigned</option>${availableStaff
           .map((staff) => `<option value="${staff.id}">${escapeHtml(staff.name)}</option>`)
           .join("")}`;
         staffSelect.value = assignment.staffId || "";
@@ -422,6 +615,7 @@
           assignment.staffId = event.target.value;
           saveState();
           renderStats();
+          renderDirtyStaffStats();
           renderStaffList();
           renderRoomList();
         });
@@ -444,6 +638,8 @@
           statusBadge.textContent = statusLabel(assignment.status);
           saveState();
           renderStats();
+          renderDirtyStaffStats();
+          renderDirtyRoomCountInput();
         });
 
         statusCell.append(statusSelect, document.createElement("br"), statusBadge);
@@ -469,9 +665,14 @@
     const assignments = getSortedAssignments(plan.assignments);
     const groupedAssignments = getAssignmentsGroupedByFloor(assignments);
 
-    const done = assignments.filter((item) => item.status === "done" || item.status === "inspected").length;
+    const clean = assignments.filter((item) => item.status === "clean").length;
+    const dirty = countDirtyAssignments(assignments);
 
-    const lines = [`Housekeeping Morning Sheet - ${selectedDate}`, `Total Rooms: ${assignments.length} | Done/Inspected: ${done}`, ""];
+    const lines = [
+      `Housekeeping Morning Sheet - ${selectedDate}`,
+      `Total Rooms: ${assignments.length} | Dirty: ${dirty} | Clean: ${clean}`,
+      "",
+    ];
 
     groupedAssignments.forEach((group) => {
       lines.push(`Floor ${group.floor}`);
@@ -505,7 +706,8 @@
     const plan = getPlan(selectedDate);
     const assignments = getSortedAssignments(plan.assignments);
     const groupedAssignments = getAssignmentsGroupedByFloor(assignments);
-    const doneCount = assignments.filter((item) => item.status === "done" || item.status === "inspected").length;
+    const cleanCount = assignments.filter((item) => item.status === "clean").length;
+    const dirtyCount = countDirtyAssignments(assignments);
 
     const floorTables = groupedAssignments
       .map((group) => {
@@ -577,7 +779,7 @@
   <body>
     <h1>Morning Housekeeping Sheet</h1>
     <p class="meta">Date: ${escapeHtml(selectedDate)}</p>
-    <p class="summary">Total Rooms: ${assignments.length} | Done/Inspected: ${doneCount}</p>
+    <p class="summary">Total Rooms: ${assignments.length} | Dirty: ${dirtyCount} | Clean: ${cleanCount}</p>
     ${floorTables}
   </body>
 </html>`;
@@ -604,6 +806,101 @@
 
   function getRoom(roomId) {
     return state.rooms.find((room) => room.id === roomId);
+  }
+
+  function getAvailabilityMap(dateKey) {
+    if (!state.availabilityByDate || typeof state.availabilityByDate !== "object") {
+      state.availabilityByDate = {};
+    }
+
+    if (!state.availabilityByDate[dateKey] || typeof state.availabilityByDate[dateKey] !== "object") {
+      state.availabilityByDate[dateKey] = {};
+    }
+
+    const availabilityMap = state.availabilityByDate[dateKey];
+    state.staff.forEach((staff) => {
+      if (typeof availabilityMap[staff.id] !== "boolean") {
+        availabilityMap[staff.id] = true;
+      }
+    });
+
+    return availabilityMap;
+  }
+
+  function getAvailableStaffForDate(dateKey) {
+    const availabilityMap = getAvailabilityMap(dateKey);
+    return state.staff.filter((staff) => availabilityMap[staff.id] !== false);
+  }
+
+  function setStaffAvailabilityForSelectedDate(staffId, isAvailable) {
+    const availabilityMap = getAvailabilityMap(selectedDate);
+    availabilityMap[staffId] = Boolean(isAvailable);
+
+    if (!isAvailable) {
+      const plan = getPlan(selectedDate);
+      plan.assignments.forEach((assignment) => {
+        if (assignment.staffId === staffId) {
+          assignment.staffId = "";
+        }
+      });
+    }
+
+    saveState();
+  }
+
+  function applyDirtyRoomCountForSelectedDate(rawCount) {
+    const plan = getPlan(selectedDate);
+    const maxRooms = plan.assignments.length;
+    const parsedCount = Number.parseInt(String(rawCount), 10);
+    const dirtyRoomCount = clampNumber(Number.isFinite(parsedCount) ? parsedCount : 0, 0, maxRooms);
+
+    const sortedAssignments = getSortedAssignments(plan.assignments);
+    sortedAssignments.forEach((assignment, index) => {
+      assignment.status = index < dirtyRoomCount ? "dirty" : "clean";
+    });
+
+    saveState();
+  }
+
+  function pickBestStaffBucketForFloor(staffBuckets, floorLabel) {
+    const candidates = staffBuckets.filter((bucket) => bucket.roomCount < bucket.targetQuota);
+    if (!candidates.length) {
+      return null;
+    }
+
+    candidates.sort((bucketA, bucketB) => {
+      const floorPenaltyA = floorPenaltyForBucket(bucketA, floorLabel);
+      const floorPenaltyB = floorPenaltyForBucket(bucketB, floorLabel);
+      if (floorPenaltyA !== floorPenaltyB) {
+        return floorPenaltyA - floorPenaltyB;
+      }
+
+      const remainingA = bucketA.targetQuota - bucketA.roomCount;
+      const remainingB = bucketB.targetQuota - bucketB.roomCount;
+      if (remainingA !== remainingB) {
+        return remainingB - remainingA;
+      }
+
+      if (bucketA.floors.size !== bucketB.floors.size) {
+        return bucketA.floors.size - bucketB.floors.size;
+      }
+
+      return bucketA.staffId.localeCompare(bucketB.staffId);
+    });
+
+    return candidates[0];
+  }
+
+  function floorPenaltyForBucket(staffBucket, floorLabel) {
+    if (staffBucket.floors.has(floorLabel)) {
+      return 0;
+    }
+
+    if (staffBucket.floors.size === 0) {
+      return 1;
+    }
+
+    return 5 + staffBucket.floors.size;
   }
 
   function findPreviousStaffForRoom(roomId, dateKey) {
@@ -635,15 +932,19 @@
   }
 
   function normalizeStatus(statusValue) {
-    return STATUS_OPTIONS.some((item) => item.value === statusValue) ? statusValue : "pending";
+    return STATUS_OPTIONS.some((item) => item.value === statusValue) ? statusValue : "dirty";
   }
 
   function statusLabel(statusValue) {
-    return STATUS_OPTIONS.find((item) => item.value === statusValue)?.label || "Pending";
+    return STATUS_OPTIONS.find((item) => item.value === statusValue)?.label || "Dirty";
   }
 
   function statusClass(statusValue) {
-    return STATUS_OPTIONS.find((item) => item.value === statusValue)?.className || "status-pending";
+    return STATUS_OPTIONS.find((item) => item.value === statusValue)?.className || "status-dirty";
+  }
+
+  function countDirtyAssignments(assignments) {
+    return assignments.filter((assignment) => assignment.status === "dirty").length;
   }
 
   function getSortedAssignments(assignments) {
@@ -759,6 +1060,33 @@
 
     const roomNames = rooms.map((room) => room.name).sort().join(",");
     return roomNames === "101,102,201,202";
+  }
+
+  function buildDefaultStaff() {
+    return DEFAULT_TEAM_SEED.map((member) => ({
+      id: makeId(),
+      name: member.name,
+      role: member.role,
+    }));
+  }
+
+  function normalizeName(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function clampNumber(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function rotateArray(items, offset) {
+    if (!items.length) {
+      return [];
+    }
+
+    const shift = ((offset % items.length) + items.length) % items.length;
+    return [...items.slice(shift), ...items.slice(0, shift)];
   }
 
   function todayISO() {
